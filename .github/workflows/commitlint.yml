@@ -1,0 +1,69 @@
+# Reusable: lint Conventional Commits on a pull request in the caller repo.
+name: commitlint (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      print-git-describe:
+        description: Print git describe after lint (dev build identity)
+        type: boolean
+        required: false
+        default: true
+      tooling-ref:
+        description: Ref of MLV-WIP/release-tooling
+        type: string
+        required: false
+        default: v1.0.0
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  commitlint:
+    name: Conventional Commits
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout consumer
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Checkout release-tooling
+        uses: actions/checkout@v4
+        with:
+          repository: MLV-WIP/release-tooling
+          ref: ${{ inputs.tooling-ref }}
+          path: .release-tooling
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "lts/*"
+          cache: npm
+          cache-dependency-path: .release-tooling/package-lock.json
+
+      - name: Install tooling
+        working-directory: .release-tooling
+        run: |
+          if [[ -f package-lock.json ]]; then
+            npm clean-install
+          else
+            npm install
+          fi
+
+      - name: Lint PR commits
+        run: |
+          set -euo pipefail
+          base="${{ github.event.pull_request.base.sha }}"
+          head="${{ github.event.pull_request.head.sha }}"
+          echo "Linting commits ${base}..${head}"
+          export PATH="$GITHUB_WORKSPACE/.release-tooling/node_modules/.bin:$PATH"
+          commitlint --config .release-tooling/commitlint.config.cjs \
+            --from "$base" --to "$head" --verbose
+
+      - name: Build identity (git describe)
+        if: inputs.print-git-describe
+        run: |
+          set -euo pipefail
+          echo "git describe: $(git describe --tags --match 'v*' --always --dirty)"

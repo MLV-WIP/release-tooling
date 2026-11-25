@@ -24,7 +24,15 @@ on:
         description: Ref of MLV-WIP/release-tooling to install from
         type: string
         required: false
-        default: v1.0.0
+        default: v1.1.0
+      github-app-environment:
+        description: >
+          Caller-repo Environment that holds RELEASE_APP_CLIENT_ID (var) and
+          RELEASE_APP_PRIVATE_KEY (secret). Required so pushes can use a
+          ruleset-bypass GitHub App instead of GITHUB_TOKEN.
+        type: string
+        required: false
+        default: mlv-release-bot-env
 
 permissions:
   contents: read
@@ -33,16 +41,27 @@ jobs:
   release:
     name: semantic-release
     runs-on: ubuntu-latest
+    environment: ${{ inputs.github-app-environment }}
     permissions:
       contents: write
       issues: write
       pull-requests: write
     steps:
+      # GITHUB_TOKEN / github-actions[bot] cannot bypass branch rulesets.
+      # Mint an installation token for the caller's release App (on Bypass list).
+      - name: Mint GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
       - name: Checkout consumer
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           persist-credentials: true
+          token: ${{ steps.app-token.outputs.token }}
 
       - name: Sync to CI-verified main tip
         run: |
@@ -75,7 +94,8 @@ jobs:
 
       - name: Release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Same env var name semantic-release expects; value is the App token.
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
           GIT_AUTHOR_NAME: semantic-release-bot
           GIT_AUTHOR_EMAIL: semantic-release-bot@users.noreply.github.com
           GIT_COMMITTER_NAME: semantic-release-bot
